@@ -40,6 +40,7 @@ class PlaceAPITests(APITestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["name"], "Pub")
+        self.assertFalse(response.data["can_manage"])
 
     def test_anonymous_retrieve_private_place_404(self):
         place = Place.objects.create(name="Prv", public=False)
@@ -63,6 +64,7 @@ class PlaceAPITests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data["can_manage"])
         place = Place.objects.get(pk=response.data["id"])
         self.assertTrue(self.owner.has_perm("booking.manage_place", place))
 
@@ -92,6 +94,7 @@ class PlaceAPITests(APITestCase):
         self.client.force_authenticate(user=self.viewer)
         get_r = self.client.get(reverse("place-detail", kwargs={"pk": place_id}))
         self.assertEqual(get_r.status_code, status.HTTP_200_OK)
+        self.assertFalse(get_r.data["can_manage"])
         patch_r = self.client.patch(
             reverse("place-detail", kwargs={"pk": place_id}),
             {"name": "Hacked"},
@@ -114,6 +117,7 @@ class PlaceAPITests(APITestCase):
         )
         self.assertEqual(patch_r.status_code, status.HTTP_200_OK)
         self.assertEqual(patch_r.data["name"], "Updated")
+        self.assertTrue(patch_r.data["can_manage"])
 
     def test_anonymous_list_places_ordering_by_name(self):
         Place.objects.create(name="Zed", public=True)
@@ -135,6 +139,31 @@ class PlaceAPITests(APITestCase):
         self.assertEqual(len(list_results(response)), 2)
         self.assertEqual(response.data["count"], 5)
         self.assertIsNotNone(response.data.get("next"))
+
+    def test_anonymous_list_places_managed_by_me_empty(self):
+        Place.objects.create(name="Pub", public=True)
+        response = self.client.get(reverse("place-list"), {"managed_by_me": "true"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(list_results(response), [])
+
+    def test_authenticated_list_places_managed_by_me(self):
+        self.client.force_authenticate(user=self.owner)
+        self.client.post(
+            reverse("place-list"),
+            {"name": "Mine", "public": False},
+            format="json",
+        )
+        self.client.force_authenticate(user=self.other)
+        self.client.post(
+            reverse("place-list"),
+            {"name": "Theirs", "public": True},
+            format="json",
+        )
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.get(reverse("place-list"), {"managed_by_me": "true"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = {row["name"] for row in list_results(response)}
+        self.assertEqual(names, {"Mine"})
 
 
 class ResourceAPITests(APITestCase):
