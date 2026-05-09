@@ -1,5 +1,3 @@
-import uuid
-
 from django.contrib.auth.models import User
 from django.urls import reverse
 from guardian.shortcuts import assign_perm
@@ -7,10 +5,6 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from booking.models import Place, Resource
-
-
-def unique_slug(prefix: str = "p") -> str:
-    return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
 def list_results(response):
@@ -24,8 +18,8 @@ class PlaceAPITests(APITestCase):
         self.viewer = User.objects.create_user(username="viewer", password="pw")
 
     def test_anonymous_list_only_public_places(self):
-        Place.objects.create(name="Pub", slug=unique_slug("pub"), public=True)
-        Place.objects.create(name="Prv", slug=unique_slug("prv"), public=False)
+        Place.objects.create(name="Pub", public=True)
+        Place.objects.create(name="Prv", public=False)
         response = self.client.get(reverse("place-list"))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         names = {row["name"] for row in list_results(response)}
@@ -33,22 +27,22 @@ class PlaceAPITests(APITestCase):
         self.assertNotIn("Prv", names)
 
     def test_anonymous_list_places_filter_by_name(self):
-        Place.objects.create(name="Cafe Alpha", slug=unique_slug("a"), public=True)
-        Place.objects.create(name="Shop Beta", slug=unique_slug("b"), public=True)
+        Place.objects.create(name="Cafe Alpha", public=True)
+        Place.objects.create(name="Shop Beta", public=True)
         response = self.client.get(reverse("place-list"), {"name": "alpha"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         names = {row["name"] for row in list_results(response)}
         self.assertEqual(names, {"Cafe Alpha"})
 
     def test_anonymous_retrieve_public_place(self):
-        place = Place.objects.create(name="Pub", slug=unique_slug("pub"), public=True)
+        place = Place.objects.create(name="Pub", public=True)
         url = reverse("place-detail", kwargs={"pk": place.pk})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["name"], "Pub")
 
     def test_anonymous_retrieve_private_place_404(self):
-        place = Place.objects.create(name="Prv", slug=unique_slug("prv"), public=False)
+        place = Place.objects.create(name="Prv", public=False)
         url = reverse("place-detail", kwargs={"pk": place.pk})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
@@ -56,29 +50,27 @@ class PlaceAPITests(APITestCase):
     def test_anonymous_create_place_403(self):
         response = self.client.post(
             reverse("place-list"),
-            {"name": "N", "slug": unique_slug("n"), "public": False},
+            {"name": "N", "public": False},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_authenticated_create_place_assigns_manage(self):
         self.client.force_authenticate(user=self.owner)
-        slug = unique_slug("new")
         response = self.client.post(
             reverse("place-list"),
-            {"name": "Mine", "slug": slug, "public": False},
+            {"name": "Mine", "public": False},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        place = Place.objects.get(slug=slug)
+        place = Place.objects.get(pk=response.data["id"])
         self.assertTrue(self.owner.has_perm("booking.manage_place", place))
 
     def test_other_user_cannot_see_private_place_detail(self):
         self.client.force_authenticate(user=self.owner)
-        slug = unique_slug("mine")
         r = self.client.post(
             reverse("place-list"),
-            {"name": "Mine", "slug": slug, "public": False},
+            {"name": "Mine", "public": False},
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
@@ -89,10 +81,9 @@ class PlaceAPITests(APITestCase):
 
     def test_user_with_can_see_can_retrieve_private_not_update(self):
         self.client.force_authenticate(user=self.owner)
-        slug = unique_slug("share")
         r = self.client.post(
             reverse("place-list"),
-            {"name": "Shared", "slug": slug, "public": False},
+            {"name": "Shared", "public": False},
             format="json",
         )
         place_id = r.data["id"]
@@ -110,10 +101,9 @@ class PlaceAPITests(APITestCase):
 
     def test_owner_can_update_private_place(self):
         self.client.force_authenticate(user=self.owner)
-        slug = unique_slug("own")
         r = self.client.post(
             reverse("place-list"),
-            {"name": "O", "slug": slug, "public": False},
+            {"name": "O", "public": False},
             format="json",
         )
         place_id = r.data["id"]
@@ -126,8 +116,8 @@ class PlaceAPITests(APITestCase):
         self.assertEqual(patch_r.data["name"], "Updated")
 
     def test_anonymous_list_places_ordering_by_name(self):
-        Place.objects.create(name="Zed", slug=unique_slug("z"), public=True)
-        Place.objects.create(name="Ann", slug=unique_slug("a"), public=True)
+        Place.objects.create(name="Zed", public=True)
+        Place.objects.create(name="Ann", public=True)
         response = self.client.get(reverse("place-list"), {"ordering": "name"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         names = [row["name"] for row in list_results(response)]
@@ -137,7 +127,6 @@ class PlaceAPITests(APITestCase):
         for i in range(5):
             Place.objects.create(
                 name=f"Px{i}",
-                slug=unique_slug(str(i)),
                 public=True,
             )
         response = self.client.get(reverse("place-list"), {"limit": 2})
@@ -152,11 +141,10 @@ class ResourceAPITests(APITestCase):
     def setUp(self):
         self.owner = User.objects.create_user(username="res-owner", password="pw")
         self.viewer = User.objects.create_user(username="res-viewer", password="pw")
-        self.slug = unique_slug("pl")
         self.client.force_authenticate(user=self.owner)
         pr = self.client.post(
             reverse("place-list"),
-            {"name": "P", "slug": self.slug, "public": False},
+            {"name": "P", "public": False},
             format="json",
         )
         self.assertEqual(pr.status_code, status.HTTP_201_CREATED)
@@ -164,9 +152,7 @@ class ResourceAPITests(APITestCase):
         self.place = Place.objects.get(pk=self.place_id)
 
     def test_anonymous_lists_only_resources_on_public_places(self):
-        pub_slug = unique_slug("pubpl")
-        Place.objects.create(name="PubPl", slug=pub_slug, public=True)
-        pub = Place.objects.get(slug=pub_slug)
+        pub = Place.objects.create(name="PubPl", public=True)
         Resource.objects.create(place=pub, name="Rpub")
         Resource.objects.create(place=self.place, name="Rpriv")
         self.client.force_authenticate(user=None)
@@ -177,9 +163,7 @@ class ResourceAPITests(APITestCase):
         self.assertNotIn("Rpriv", names)
 
     def test_anonymous_list_resources_filter_by_name(self):
-        pub_slug = unique_slug("pubfl")
-        Place.objects.create(name="PubFl", slug=pub_slug, public=True)
-        pub = Place.objects.get(slug=pub_slug)
+        pub = Place.objects.create(name="PubFl", public=True)
         Resource.objects.create(place=pub, name="Meeting room A")
         Resource.objects.create(place=pub, name="Parking B")
         self.client.force_authenticate(user=None)
@@ -189,9 +173,7 @@ class ResourceAPITests(APITestCase):
         self.assertEqual(names, {"Meeting room A"})
 
     def test_anonymous_list_resources_ordering_by_name(self):
-        pub_slug = unique_slug("ord")
-        Place.objects.create(name="Ord", slug=pub_slug, public=True)
-        pub = Place.objects.get(slug=pub_slug)
+        pub = Place.objects.create(name="Ord", public=True)
         Resource.objects.create(place=pub, name="Zebra")
         Resource.objects.create(place=pub, name="Alpha")
         self.client.force_authenticate(user=None)
@@ -203,9 +185,7 @@ class ResourceAPITests(APITestCase):
         self.assertEqual(names, ["Alpha", "Zebra"])
 
     def test_anonymous_list_resources_limit_offset_pagination(self):
-        pub_slug = unique_slug("cur")
-        Place.objects.create(name="Cur", slug=pub_slug, public=True)
-        pub = Place.objects.get(slug=pub_slug)
+        pub = Place.objects.create(name="Cur", public=True)
         self.client.force_authenticate(user=None)
         for i in range(5):
             Resource.objects.create(place=pub, name=f"Rcur{i}")
@@ -216,9 +196,7 @@ class ResourceAPITests(APITestCase):
         self.assertIsNotNone(response.data.get("next"))
 
     def test_anonymous_retrieve_resource_public_place(self):
-        pub_slug = unique_slug("pubpl2")
-        Place.objects.create(name="PubPl", slug=pub_slug, public=True)
-        pub = Place.objects.get(slug=pub_slug)
+        pub = Place.objects.create(name="PubPl", public=True)
         res = Resource.objects.create(place=pub, name="R1")
         self.client.force_authenticate(user=None)
         response = self.client.get(reverse("resource-detail", kwargs={"pk": res.pk}))

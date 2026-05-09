@@ -6,8 +6,7 @@ from booking.models import Place, Resource
 
 @admin.register(Place)
 class PlaceAdmin(GuardedModelAdmin):
-    list_display = ("name", "slug", "public", "created_at")
-    prepopulated_fields = {"slug": ("name",)}
+    list_display = ("name", "public", "created_at")
 
 
 @admin.register(Resource)
