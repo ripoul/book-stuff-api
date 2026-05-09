@@ -201,6 +201,32 @@ class ResourceAPITests(APITestCase):
         names = {row["name"] for row in list_results(response)}
         self.assertEqual(names, {"Meeting room A"})
 
+    def test_anonymous_list_resources_filter_by_place_list(self):
+        pub1 = Place.objects.create(name="F1", public=True)
+        pub2 = Place.objects.create(name="F2", public=True)
+        Resource.objects.create(place=pub1, name="Rf1a")
+        Resource.objects.create(place=pub1, name="Rf1b")
+        Resource.objects.create(place=pub2, name="Rf2")
+        self.client.force_authenticate(user=None)
+        one = self.client.get(
+            reverse("resource-list"),
+            {"place": [str(pub1.pk)]},
+        )
+        self.assertEqual(one.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {row["name"] for row in list_results(one)},
+            {"Rf1a", "Rf1b"},
+        )
+        both = self.client.get(
+            reverse("resource-list"),
+            {"place": [str(pub1.pk), str(pub2.pk)]},
+        )
+        self.assertEqual(both.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            {row["name"] for row in list_results(both)},
+            {"Rf1a", "Rf1b", "Rf2"},
+        )
+
     def test_anonymous_list_resources_ordering_by_name(self):
         pub = Place.objects.create(name="Ord", public=True)
         Resource.objects.create(place=pub, name="Zebra")
