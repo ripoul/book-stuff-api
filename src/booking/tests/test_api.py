@@ -13,6 +13,10 @@ def unique_slug(prefix: str = "p") -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+def list_results(response):
+    return response.data["results"]
+
+
 class PlaceAPITests(APITestCase):
     def setUp(self):
         self.owner = User.objects.create_user(username="owner", password="pw")
@@ -24,9 +28,17 @@ class PlaceAPITests(APITestCase):
         Place.objects.create(name="Prv", slug=unique_slug("prv"), public=False)
         response = self.client.get(reverse("place-list"))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        names = {row["name"] for row in response.data}
+        names = {row["name"] for row in list_results(response)}
         self.assertIn("Pub", names)
         self.assertNotIn("Prv", names)
+
+    def test_anonymous_list_places_filter_by_name(self):
+        Place.objects.create(name="Cafe Alpha", slug=unique_slug("a"), public=True)
+        Place.objects.create(name="Shop Beta", slug=unique_slug("b"), public=True)
+        response = self.client.get(reverse("place-list"), {"name": "alpha"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = {row["name"] for row in list_results(response)}
+        self.assertEqual(names, {"Cafe Alpha"})
 
     def test_anonymous_retrieve_public_place(self):
         place = Place.objects.create(name="Pub", slug=unique_slug("pub"), public=True)
@@ -113,6 +125,28 @@ class PlaceAPITests(APITestCase):
         self.assertEqual(patch_r.status_code, status.HTTP_200_OK)
         self.assertEqual(patch_r.data["name"], "Updated")
 
+    def test_anonymous_list_places_ordering_by_name(self):
+        Place.objects.create(name="Zed", slug=unique_slug("z"), public=True)
+        Place.objects.create(name="Ann", slug=unique_slug("a"), public=True)
+        response = self.client.get(reverse("place-list"), {"ordering": "name"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [row["name"] for row in list_results(response)]
+        self.assertEqual(names, ["Ann", "Zed"])
+
+    def test_anonymous_list_places_limit_offset_pagination(self):
+        for i in range(5):
+            Place.objects.create(
+                name=f"Px{i}",
+                slug=unique_slug(str(i)),
+                public=True,
+            )
+        response = self.client.get(reverse("place-list"), {"limit": 2})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("results", response.data)
+        self.assertEqual(len(list_results(response)), 2)
+        self.assertEqual(response.data["count"], 5)
+        self.assertIsNotNone(response.data.get("next"))
+
 
 class ResourceAPITests(APITestCase):
     def setUp(self):
@@ -138,9 +172,48 @@ class ResourceAPITests(APITestCase):
         self.client.force_authenticate(user=None)
         response = self.client.get(reverse("resource-list"))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        names = {row["name"] for row in response.data}
+        names = {row["name"] for row in list_results(response)}
         self.assertIn("Rpub", names)
         self.assertNotIn("Rpriv", names)
+
+    def test_anonymous_list_resources_filter_by_name(self):
+        pub_slug = unique_slug("pubfl")
+        Place.objects.create(name="PubFl", slug=pub_slug, public=True)
+        pub = Place.objects.get(slug=pub_slug)
+        Resource.objects.create(place=pub, name="Meeting room A")
+        Resource.objects.create(place=pub, name="Parking B")
+        self.client.force_authenticate(user=None)
+        response = self.client.get(reverse("resource-list"), {"name": "meeting"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = {row["name"] for row in list_results(response)}
+        self.assertEqual(names, {"Meeting room A"})
+
+    def test_anonymous_list_resources_ordering_by_name(self):
+        pub_slug = unique_slug("ord")
+        Place.objects.create(name="Ord", slug=pub_slug, public=True)
+        pub = Place.objects.get(slug=pub_slug)
+        Resource.objects.create(place=pub, name="Zebra")
+        Resource.objects.create(place=pub, name="Alpha")
+        self.client.force_authenticate(user=None)
+        response = self.client.get(reverse("resource-list"), {"ordering": "name"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [
+            row["name"] for row in list_results(response) if row["place"] == pub.pk
+        ]
+        self.assertEqual(names, ["Alpha", "Zebra"])
+
+    def test_anonymous_list_resources_limit_offset_pagination(self):
+        pub_slug = unique_slug("cur")
+        Place.objects.create(name="Cur", slug=pub_slug, public=True)
+        pub = Place.objects.get(slug=pub_slug)
+        self.client.force_authenticate(user=None)
+        for i in range(5):
+            Resource.objects.create(place=pub, name=f"Rcur{i}")
+        response = self.client.get(reverse("resource-list"), {"limit": 2})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(list_results(response)), 2)
+        self.assertEqual(response.data["count"], 5)
+        self.assertIsNotNone(response.data.get("next"))
 
     def test_anonymous_retrieve_resource_public_place(self):
         pub_slug = unique_slug("pubpl2")
@@ -176,7 +249,7 @@ class ResourceAPITests(APITestCase):
         self.client.force_authenticate(user=self.viewer)
         lr = self.client.get(reverse("resource-list"))
         self.assertEqual(lr.status_code, status.HTTP_200_OK)
-        ids = {row["id"] for row in lr.data}
+        ids = {row["id"] for row in list_results(lr)}
         self.assertIn(res.pk, ids)
         gr = self.client.get(reverse("resource-detail", kwargs={"pk": res.pk}))
         self.assertEqual(gr.status_code, status.HTTP_200_OK)

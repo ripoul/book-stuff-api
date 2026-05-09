@@ -1,6 +1,9 @@
+from django_filters.rest_framework import DjangoFilterBackend
 from guardian.shortcuts import get_objects_for_user
+from rest_framework.filters import OrderingFilter
 from rest_framework.viewsets import ModelViewSet
 
+from booking.filter import ResourceFilter
 from booking.models import Place, Resource
 from booking.permissions import ResourcePermission
 from booking.serializers.resource import ResourceSerializer
@@ -9,6 +12,9 @@ from booking.serializers.resource import ResourceSerializer
 class ResourceViewSet(ModelViewSet):
     serializer_class = ResourceSerializer
     permission_classes = [ResourcePermission]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = ResourceFilter
+    ordering_fields = ["name", "created_at", "id"]
 
     def get_queryset(self):
         user = self.request.user
