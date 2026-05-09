@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "django_filters",
     "booking.apps.BookingConfig",
     "accounts.apps.AccountsConfig",
+    "drf_spectacular",
 ]
 
 MIDDLEWARE = [
@@ -138,9 +139,16 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 100,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Book Stuff API",
+    "VERSION": "0.1.0",
+    "SERVE_PERMISSIONS": ["rest_framework.permissions.AllowAny"],
 }
