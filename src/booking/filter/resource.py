@@ -12,4 +12,4 @@ class ResourceFilter(filters.FilterSet):
 
     class Meta:
         model = Resource
-        fields = ["name"]
+        fields = ["name", "place"]

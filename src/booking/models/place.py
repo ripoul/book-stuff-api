@@ -1,7 +1,9 @@
 from django.db import models
 
+from booking.models.base import UUIDPrimaryKeyModel
 
-class Place(models.Model):
+
+class Place(UUIDPrimaryKeyModel):
     name = models.CharField(max_length=255)
     public = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)

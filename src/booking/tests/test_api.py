@@ -235,7 +235,9 @@ class ResourceAPITests(APITestCase):
         response = self.client.get(reverse("resource-list"), {"ordering": "name"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         names = [
-            row["name"] for row in list_results(response) if row["place"] == pub.pk
+            row["name"]
+            for row in list_results(response)
+            if str(row["place"]) == str(pub.pk)
         ]
         self.assertEqual(names, ["Alpha", "Zebra"])
 
@@ -282,8 +284,8 @@ class ResourceAPITests(APITestCase):
         self.client.force_authenticate(user=self.viewer)
         lr = self.client.get(reverse("resource-list"))
         self.assertEqual(lr.status_code, status.HTTP_200_OK)
-        ids = {row["id"] for row in list_results(lr)}
-        self.assertIn(res.pk, ids)
+        ids = {str(row["id"]) for row in list_results(lr)}
+        self.assertIn(str(res.pk), ids)
         gr = self.client.get(reverse("resource-detail", kwargs={"pk": res.pk}))
         self.assertEqual(gr.status_code, status.HTTP_200_OK)
 
