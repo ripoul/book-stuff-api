@@ -5,10 +5,12 @@ from rest_framework import serializers
 class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     email = serializers.EmailField()
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ("id", "email", "password")
+        fields = ("id", "email", "password", "first_name", "last_name")
         read_only_fields = ("id",)
 
     def validate_email(self, value):
@@ -20,19 +22,25 @@ class UserCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         email = validated_data["email"]
         password = validated_data["password"]
+        first_name = validated_data.get("first_name", "")
+        last_name = validated_data.get("last_name", "")
         return User.objects.create_user(
             username=email,
             email=email,
             password=password,
+            first_name=first_name,
+            last_name=last_name,
         )
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, min_length=8)
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ("id", "username", "email", "password")
+        fields = ("id", "username", "email", "password", "first_name", "last_name")
         read_only_fields = ("id", "username")
 
     def validate_email(self, value):

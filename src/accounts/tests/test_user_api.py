@@ -18,6 +18,24 @@ class UserCreateAPITests(APITestCase):
         u = User.objects.get(email="newbie@example.com")
         self.assertEqual(u.username, "newbie@example.com")
 
+    def test_create_user_with_first_and_last_name(self):
+        response = self.client.post(
+            reverse("user-list"),
+            {
+                "email": "named@example.com",
+                "password": "longsecret1",
+                "first_name": "Jean",
+                "last_name": "Dupont",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        u = User.objects.get(email="named@example.com")
+        self.assertEqual(u.first_name, "Jean")
+        self.assertEqual(u.last_name, "Dupont")
+        self.assertEqual(response.data["first_name"], "Jean")
+        self.assertEqual(response.data["last_name"], "Dupont")
+
 
 class UserRetrieveUpdateAPITests(APITestCase):
     def setUp(self):
@@ -44,6 +62,8 @@ class UserRetrieveUpdateAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["username"], "me@example.com")
         self.assertEqual(response.data["email"], "me@example.com")
+        self.assertEqual(response.data["first_name"], "")
+        self.assertEqual(response.data["last_name"], "")
 
     def test_retrieve_other_returns_404(self):
         self.client.force_authenticate(user=self.me)
@@ -64,7 +84,20 @@ class UserRetrieveUpdateAPITests(APITestCase):
         self.assertEqual(self.me.email, "newemail@example.com")
         self.assertEqual(self.me.username, "newemail@example.com")
 
-    def test_patch_other_returns_404(self):
+    def test_patch_self_updates_first_and_last_name(self):
+        self.client.force_authenticate(user=self.me)
+        url = reverse("user-detail", kwargs={"pk": self.me.pk})
+        response = self.client.patch(
+            url,
+            {"first_name": "Marie", "last_name": "Martin"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.me.refresh_from_db()
+        self.assertEqual(self.me.first_name, "Marie")
+        self.assertEqual(self.me.last_name, "Martin")
+        self.assertEqual(response.data["first_name"], "Marie")
+        self.assertEqual(response.data["last_name"], "Martin")
         self.client.force_authenticate(user=self.me)
         url = reverse("user-detail", kwargs={"pk": self.other.pk})
         response = self.client.patch(
