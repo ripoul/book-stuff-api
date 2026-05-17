@@ -1,3 +1,5 @@
+from datetime import datetime, timezone as dt_timezone
+
 from django.contrib.auth.models import User
 from django.urls import reverse
 from guardian.shortcuts import assign_perm
@@ -314,3 +316,247 @@ class ResourceAPITests(APITestCase):
         )
         self.assertEqual(del_r.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(Resource.objects.filter(pk=res.pk).exists())
+
+
+class ReservationAPITests(APITestCase):
+    def _iso_utc(self, year, month, day, hour, minute=0):
+        return (
+            datetime(year, month, day, hour, minute, 0, tzinfo=dt_timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="rsv-owner", password="pw")
+        self.viewer = User.objects.create_user(username="rsv-viewer", password="pw")
+        self.other = User.objects.create_user(username="rsv-other", password="pw")
+        self.client.force_authenticate(user=self.owner)
+        pr = self.client.post(
+            reverse("place-list"),
+            {"name": "RsvPlace", "public": False},
+            format="json",
+        )
+        self.assertEqual(pr.status_code, status.HTTP_201_CREATED)
+        self.place = Place.objects.get(pk=pr.data["id"])
+        rr = self.client.post(
+            reverse("resource-list"),
+            {"place": str(self.place.pk), "name": "Room"},
+            format="json",
+        )
+        self.assertEqual(rr.status_code, status.HTTP_201_CREATED)
+        self.resource = Resource.objects.get(pk=rr.data["id"])
+        assign_perm("booking.can_see", self.viewer, self.place)
+
+    def test_viewer_with_can_see_creates_reservation(self):
+        self.client.force_authenticate(user=self.viewer)
+        response = self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 6, 1, 10),
+                "ends_at": self._iso_utc(2026, 6, 1, 11),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(str(response.data["created_by"]), str(self.viewer.pk))
+
+    def test_rejects_overlapping_reservation(self):
+        self.client.force_authenticate(user=self.viewer)
+        first = self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 6, 1, 10),
+                "ends_at": self._iso_utc(2026, 6, 1, 12),
+            },
+            format="json",
+        )
+        self.assertEqual(first.status_code, status.HTTP_201_CREATED)
+        second = self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 6, 1, 11),
+                "ends_at": self._iso_utc(2026, 6, 1, 13),
+            },
+            format="json",
+        )
+        self.assertEqual(second.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_allows_back_to_back_reservations(self):
+        self.client.force_authenticate(user=self.viewer)
+        a = self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 6, 2, 10),
+                "ends_at": self._iso_utc(2026, 6, 2, 11),
+            },
+            format="json",
+        )
+        self.assertEqual(a.status_code, status.HTTP_201_CREATED)
+        b = self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 6, 2, 11),
+                "ends_at": self._iso_utc(2026, 6, 2, 12),
+            },
+            format="json",
+        )
+        self.assertEqual(b.status_code, status.HTTP_201_CREATED)
+
+    def test_creator_can_patch_not_other_viewer(self):
+        self.client.force_authenticate(user=self.viewer)
+        created = self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 6, 3, 9),
+                "ends_at": self._iso_utc(2026, 6, 3, 10),
+            },
+            format="json",
+        )
+        rid = created.data["id"]
+        self.client.force_authenticate(user=self.viewer)
+        ok = self.client.patch(
+            reverse("reservation-detail", kwargs={"pk": rid}),
+            {"ends_at": self._iso_utc(2026, 6, 3, 10, 30)},
+            format="json",
+        )
+        self.assertEqual(ok.status_code, status.HTTP_200_OK)
+        self.client.force_authenticate(user=self.other)
+        denied = self.client.patch(
+            reverse("reservation-detail", kwargs={"pk": rid}),
+            {"ends_at": self._iso_utc(2026, 6, 3, 11)},
+            format="json",
+        )
+        self.assertEqual(denied.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_manager_can_patch_any_reservation(self):
+        self.client.force_authenticate(user=self.viewer)
+        created = self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 6, 4, 9),
+                "ends_at": self._iso_utc(2026, 6, 4, 10),
+            },
+            format="json",
+        )
+        rid = created.data["id"]
+        self.client.force_authenticate(user=self.owner)
+        ok = self.client.patch(
+            reverse("reservation-detail", kwargs={"pk": rid}),
+            {"ends_at": self._iso_utc(2026, 6, 4, 11)},
+            format="json",
+        )
+        self.assertEqual(ok.status_code, status.HTTP_200_OK)
+
+    def test_rejects_naive_datetimes_on_create(self):
+        self.client.force_authenticate(user=self.viewer)
+        response = self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": "2026-06-05T10:00:00",
+                "ends_at": "2026-06-05T11:00:00",
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_overlap_window_filter(self):
+        self.client.force_authenticate(user=self.viewer)
+        self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 7, 1, 8),
+                "ends_at": self._iso_utc(2026, 7, 1, 9),
+            },
+            format="json",
+        )
+        mid = self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 7, 1, 10),
+                "ends_at": self._iso_utc(2026, 7, 1, 12),
+            },
+            format="json",
+        )
+        self.assertEqual(mid.status_code, status.HTTP_201_CREATED)
+        mid_id = mid.data["id"]
+        response = self.client.get(
+            reverse("reservation-list"),
+            {
+                "overlap_start": self._iso_utc(2026, 7, 1, 10, 30),
+                "overlap_end": self._iso_utc(2026, 7, 1, 11, 30),
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        ids = {str(r["id"]) for r in list_results(response)}
+        self.assertEqual(ids, {mid_id})
+
+    def test_overlap_filter_with_only_overlap_start_returns_200(self):
+        self.client.force_authenticate(user=self.viewer)
+        response = self.client.get(
+            reverse("reservation-list"),
+            {"overlap_start": self._iso_utc(2026, 7, 1, 0)},
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_overlap_query_accepts_naive_datetime(self):
+        self.client.force_authenticate(user=self.viewer)
+        response = self.client.get(
+            reverse("reservation-list"),
+            {
+                "overlap_start": "2026-07-01T10:30:00",
+                "overlap_end": self._iso_utc(2026, 7, 1, 11, 30),
+            },
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_anonymous_cannot_create_reservation(self):
+        self.client.force_authenticate(user=None)
+        response = self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 8, 1, 10),
+                "ends_at": self._iso_utc(2026, 8, 1, 11),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_anonymous_lists_reservations_on_public_place_only(self):
+        pub = Place.objects.create(name="PubRsv", public=True)
+        res_pub = Resource.objects.create(place=pub, name="PubRes")
+        self.client.force_authenticate(user=self.owner)
+        self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(res_pub.pk),
+                "starts_at": self._iso_utc(2026, 9, 1, 10),
+                "ends_at": self._iso_utc(2026, 9, 1, 11),
+            },
+            format="json",
+        )
+        self.client.post(
+            reverse("reservation-list"),
+            {
+                "resource": str(self.resource.pk),
+                "starts_at": self._iso_utc(2026, 9, 2, 10),
+                "ends_at": self._iso_utc(2026, 9, 2, 11),
+            },
+            format="json",
+        )
+        self.client.force_authenticate(user=None)
+        response = self.client.get(reverse("reservation-list"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        ids = {str(r["resource"]) for r in list_results(response)}
+        self.assertIn(str(res_pub.pk), ids)
+        self.assertNotIn(str(self.resource.pk), ids)

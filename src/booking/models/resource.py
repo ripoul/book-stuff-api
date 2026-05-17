@@ -2,9 +2,12 @@ from django.db import models
 
 from booking.models.base import UUIDPrimaryKeyModel
 from booking.models.place import Place
+from booking.models.querysets import ResourceManager
 
 
 class Resource(UUIDPrimaryKeyModel):
+    objects = ResourceManager()
+
     place = models.ForeignKey(
         Place,
         on_delete=models.CASCADE,
